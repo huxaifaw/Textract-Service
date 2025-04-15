@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.textract.domain.BlockDTO;
 import com.textract.domain.BoundingBoxDTO;
+import com.textract.domain.GeometryDTO;
 import com.textract.domain.TextractRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -13,8 +14,8 @@ import software.amazon.awssdk.services.textract.TextractClient;
 import software.amazon.awssdk.services.textract.model.*;
 import software.amazon.awssdk.services.s3.S3Client;
 
+import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -50,6 +51,7 @@ public class TextExtractionService {
             log.info("Starting OCR generation");
             String jobId = startTextDetection(textractRequest.getBucket(), textractRequest.getDocumentKey());
             blocks = getTextDetectionResults(jobId);
+            saveOcrFile(blocks);
             log.info("OCR generated");
         }
 
@@ -59,6 +61,14 @@ public class TextExtractionService {
                 .filter(block -> isWithinBoundingBox(block.geometry().boundingBox(), textractRequest.getX(), textractRequest.getY(), textractRequest.getWidth(), textractRequest.getHeight()))
                 .map(Block::text)
                 .collect(Collectors.joining(" "));
+    }
+
+    private void saveOcrFile(List<Block> blocks) throws IOException {
+        List<BlockDTO> blockDTOs = blocks.stream()
+                .map(this::toBlockDTO)
+                .toList();
+        objectMapper.writeValue(new File("./raw_response.json"), blockDTOs);
+        log.info("OCR File saved");
     }
 
     private String startTextractAnalysis(String bucket, String documentKey) {
@@ -171,5 +181,26 @@ public class TextExtractionService {
                     .build()
             ).toList();
         }
+    }
+
+    public BlockDTO toBlockDTO(Block block) {
+        BlockDTO dto = new BlockDTO();
+        dto.setBlockType(block.blockTypeAsString());
+        dto.setPage(block.page());
+        dto.setConfidence(block.confidence());
+        dto.setText(block.text());
+        if (block.geometry() != null && block.geometry().boundingBox() != null) {
+            BoundingBox bb = block.geometry().boundingBox();
+            BoundingBoxDTO bboxDto = new BoundingBoxDTO();
+            bboxDto.setWidth(bb.width());
+            bboxDto.setHeight(bb.height());
+            bboxDto.setLeft(bb.left());
+            bboxDto.setTop(bb.top());
+
+            GeometryDTO geometryDTO = new GeometryDTO();
+            geometryDTO.setBoundingBox(bboxDto);
+            dto.setGeometry(geometryDTO);
+        }
+        return dto;
     }
 }
